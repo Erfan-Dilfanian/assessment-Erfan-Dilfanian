@@ -1,0 +1,19 @@
+# Python virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Optional: ignore test outputs
+results/
+*.log
+
+# Video files
+*.mp4
+
+# OS / editor junk (optional but recommended)
+.DS_Store
+Thumbs.db
