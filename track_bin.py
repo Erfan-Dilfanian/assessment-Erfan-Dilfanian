@@ -5,25 +5,33 @@ You are free to restructure this entirely — it is a starting point only.
 """
 
 import cv2
-import json
+#import json
 import argparse
 import time
 import numpy as np
 
 
+from localizer import (
+    load_calib,
+    build_extrinsic,
+    cam_to_world,
+    estimate_3d,
+    camera_distance_from_xyz,
+)
+
 # ---------------------------------------------------------------------------
 # Known target dimensions
 # ---------------------------------------------------------------------------
-
+"""
 BIN_DIAMETER_M = 0.40   # standard outdoor garbage bin, metres
 BIN_HEIGHT_M   = 0.65
-
+"""
 
 # ---------------------------------------------------------------------------
 # Configuration loader
 # ---------------------------------------------------------------------------
 
-def load_calib(path: str):
+def load_calib_(path: str):
     """
     Load camera intrinsics and mount geometry from calib.json.
     Returns:
@@ -40,12 +48,12 @@ def load_calib(path: str):
     tilt_rad = float(np.deg2rad(c["camera_tilt_deg"]))
     return K, D, cam_h, tilt_rad
 
-
+"""
 # ---------------------------------------------------------------------------
 # Coordinate transforms
 # ---------------------------------------------------------------------------
-
-def build_extrinsic(cam_h: float, tilt_rad: float):
+"""
+def build_extrinsic_(cam_h: float, tilt_rad: float):
     """
     Build the rotation matrix R and translation vector t mapping
     a point in the CAMERA frame to the WORLD frame.
@@ -66,7 +74,7 @@ def build_extrinsic(cam_h: float, tilt_rad: float):
     raise NotImplementedError("TODO: implement build_extrinsic")
 
 
-def cam_to_world(xyz_cam: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
+def cam_to_world_(xyz_cam: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
     return R @ xyz_cam + t
 
 
@@ -107,7 +115,7 @@ def detect_bin_(frame: np.ndarray, model) -> tuple | None:
 # 3D localisation (monocular, known object size)
 # ---------------------------------------------------------------------------
 
-def estimate_3d(
+def estimate_3d_(
     bbox: tuple,
     K: np.ndarray,
     D: np.ndarray,
@@ -175,7 +183,7 @@ def main():
     args = parser.parse_args()
 
     K, D, cam_h, tilt_rad = load_calib(args.calib)
-    # R, t = build_extrinsic(cam_h, tilt_rad)
+    R, t = build_extrinsic(cam_h, tilt_rad)
     model = load_detector(use_gpu=args.gpu)
 
     if args.gpu:
@@ -235,8 +243,9 @@ def main():
 
 
 
-                """
+                
                 xyz_cam   = estimate_3d((x1, y1, x2, y2), K, D)
+                dist_cam = camera_distance_from_xyz(xyz_cam)
                 xyz_world = cam_to_world(xyz_cam, R, t)
 
                 if kf is not None:
@@ -249,23 +258,23 @@ def main():
                 dt_ms = int((time.perf_counter() - t0) * 1000)
                 print(f"[frame {frame_id:04d}] bin @ world "
                       f"({xw:.2f}, {yw:.2f}, {zw:.2f}) m  "
-                      f"conf={conf:.2f}  dt={dt_ms}ms")
+                      f"cam_dist={dist_cam:.2f}m  conf={conf:.2f}  dt={dt_ms}ms")
 
                 csv.write(f"{frame_id},{ts_ms},"
                           f"{xyz_cam[0]:.4f},{xyz_cam[1]:.4f},{xyz_cam[2]:.4f},"
                           f"{xw:.4f},{yw:.4f},{zw:.4f},{conf:.3f}\n")
                 trajectory.append((xw, yw))
-            """
+            
             else:
                 print(f"[frame {frame_id:04d}] NO DETECTION")
-            """
+            
                 last_age += 1
                 predicted = kf.predict() if kf is not None else last_known
                 lk = (f"({predicted[0]:.2f}, {predicted[1]:.2f}, {predicted[2]:.2f})"
                       if predicted is not None else "unknown")
                 print(f"[frame {frame_id:04d}] OCCLUDED — "
                       f"last known {lk} m  age={last_age}fr")
-            """
+            
             # show live video
             cv2.imshow("Bin Detection", frame)
 
@@ -278,10 +287,10 @@ def main():
     
     cap.release()
     cv2.destroyAllWindows()
-    """
+    
     _save_trajectory_plot(trajectory)
     print(f"\nDone. Results saved to {args.output} and trajectory.png")
-    """
+    
 
 
 def _save_trajectory_plot(trajectory: list):
