@@ -26,50 +26,7 @@ def load_calib(path: str):
     return K, D, cam_h, tilt_rad
 
 
-def build_extrinsic(cam_h: float, tilt_rad: float):
-    """
-    Build camera-to-world extrinsics such that:
 
-        P_world = R @ P_cam + t
-
-    World frame:
-        origin at pole base on the ground
-        +X = forward on the ground
-        +Y = left
-        +Z = up
-
-    Camera frame (OpenCV):
-        +X = right
-        +Y = down
-        +Z = forward
-    """
-    alpha = abs(tilt_rad)
-
-    # Level camera -> chosen world frame
-    R0 = np.array([
-        [0.0,  0.0,  1.0],
-        [-1.0, 0.0,  0.0],
-        [0.0, -1.0,  0.0]
-    ], dtype=np.float64)
-
-    c = np.cos(alpha)
-    s = np.sin(alpha)
-
-    # Downward pitch about world Y axis
-    Ry = np.array([
-        [ c, 0.0,  s],
-        [0.0, 1.0, 0.0],
-        [-s, 0.0,  c]
-    ], dtype=np.float64)
-
-    R = Ry @ R0
-    t = np.array([0.0, 0.0, cam_h], dtype=np.float64)
-
-    return R, t
-
-
-def cam_to_world(xyz_cam: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
-    return R @ xyz_cam + t
 
 
 def estimate_3d(bbox: tuple, K: np.ndarray, D: np.ndarray) -> np.ndarray:
