@@ -104,19 +104,17 @@ Otherwise, the frame is treated as occluded.
 
 An Image-space motion model is develoepd. When detections are available, we estimate the image-plane velocity of the bin:
 
-[
-v_x = c_x^{(t)} - c_x^{(t-1)}, \quad
-v_y = c_y^{(t)} - c_y^{(t-1)}
-]
+v_x = c_x(t) - c_x(t-1)
+
+v_y = c_y(t) - c_y(t-1)
 
 where ((c_x, c_y)) is the bounding box center.
 
 During occlusion, we propagate the last known bounding box:
 
-[
-c_x^{pred} = c_x + v_x, \quad
-c_y^{pred} = c_y + v_y
-]
+c_x_pred = c_x + v_x
+
+c_y_pred = c_y + v_y
 
 The width and height are kept constant, producing a predicted bounding box.
 
@@ -130,9 +128,7 @@ This allows:
 
 There is a Temporal constraint for the prediction. Prediction is only trusted for a limited duration:
 
-[
-\text{age} \leq \text{MAX_OCCLUSION_FRAMES} = 12
-]
+age <= MAX_OCCLUSION_FRAMES (= 12)
 
 After that, the target is considered lost.
 
@@ -179,11 +175,9 @@ Precision: 0.9762
 Recall: 0.999
 
 # 2. 3D localization
-Here’s a **clean, reviewer-ready README section** you can paste (or slightly adapt). It is written exactly based on your implementation, including derivations, logic, and assumptions — and aligned with what they explicitly expect.
 
----
----
-# **2. 3D Localisation**
+
+
 
 This section describes how the 3D position of the garbage bin is estimated from monocular images using the pinhole camera model and known object dimensions, and how it is transformed into a world coordinate frame.
 
