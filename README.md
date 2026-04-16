@@ -321,10 +321,12 @@ This is implemented using the matrix:
 R_axis =
 
 [  0   0   1 ]
+
 [ -1   0   0 ]
+
 [  0  -1   0 ]
 
----
+
 
 Then we drive R matrix for Camera tilt compensation:
 
@@ -334,7 +336,9 @@ We apply a rotation around the Y-axis:
 R_y (rotation around Y-axis):
 
 [  cos(θ)   0   sin(θ) ]
+
 [    0      1     0    ]
+
 [ -sin(θ)   0   cos(θ) ]
 
 
@@ -363,61 +367,16 @@ P_world = R * P_cam + t
 
 
 
-### **Interpretation**
 
-* Rotation aligns coordinate systems and accounts for tilt
-* Translation places the camera above the ground
-* Result:
-
-  * (Z_{world}) represents **height above ground**
-  * (X_{world}, Y_{world}) define ground-plane position
-
----
-
-### **Output format**
+Output format:
 
 ```
 frame_id, t_ms, x_cam, y_cam, z_cam,
 x_world, y_world, z_world, conf
 ```
 
-This matches Task 2c requirements .
 
----
 
-## **Summary of pipeline**
 
-For each frame:
-
-1. Detect bounding box
-2. Compute:
-
-   * Pixel height → depth (Z)
-   * Undistorted centroid → (x_n, y_n)
-   * (X, Y) from normalized coordinates
-3. Form:
-   [
-   P_{cam} = (X, Y, Z)
-   ]
-4. Transform:
-   [
-   P_{world} = R P_{cam} + t
-   ]
-5. Output results in CSV + real-time logs
-
----
-
-## **Why this works well**
-
-* Uses **physical object size → metric scale**
-* Uses **camera calibration → accurate projection**
-* Uses **full geometry → no black-box solvePnP**
-* Meets requirement:
-
-  * explicit derivation
-  * interpretable pipeline
-  * no disallowed shortcuts
-
----
 
 
