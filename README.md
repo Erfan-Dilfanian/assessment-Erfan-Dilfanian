@@ -520,4 +520,15 @@ I tuned `process_var`(Q) and `meas_var`(R) in Klaman filter. With the prior know
 
 
 ## 3d. edge deployment notes
-You may resize images before passing them to the detection model to reduce inference time 
+First thing to note is that Jetson Orin NX uses an ARM64 architecture, so some packages (e.g., PyTorch) need Jetson-specific builds.
+
+Lighter variants of YOLOv8 like YOLOv8n are advised for limited-gpu onboard processors likeJetson.
+
+On Jetson Orin NX, I’d export the model to TensorRT and run it in FP16 for a good speed/accuracy balance. If I needed extra speed, I’d try INT8, but only after proper calibration to avoid hurting detection quality. (RKNN isn’t relevant for Jetson.)
+
+I may resize images before passing them to the detection model to reduce inference time 
+
+Since the camera is no longer fixed, the transform becomes dynamic. I’d estimate the bin in the camera frame, then use the UAV pose (from IMU + GPS fused in an EKF) to project it into the world frame each frame.
+
+If needed, I’d also reduce the input frame rate (e.g., process every 2nd frame) to keep latency low under heavier load. Since the bin moves slowly, this has little impact on tracking, especially with the Kalman filter filling in between frames.
+
