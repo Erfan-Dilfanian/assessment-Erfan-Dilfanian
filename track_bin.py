@@ -195,7 +195,7 @@ class PositionKalman:
 
     def __init__(self, dt: float = 1/30,
                  process_var: float = 2e-3,  # Q, process noise. lower Q means motion is smooth
-                 meas_var: float = 7e-2):    # R, measuremtn noise, higher R means measuremetns are noisy
+                 meas_var: float = 7e-2):    # R, measurement noise, higher R means measuremetns are noisy
         self.dt = dt
 
         # state vector: [x, y, z, vx, vy, vz]
@@ -335,6 +335,7 @@ def main():
 
     import os
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    jitter_txt_path = os.path.join(os.path.dirname(args.output) or ".", "jitter_analysis.txt")
 
     trajectory = []
     raw_trajectory = []
@@ -494,12 +495,22 @@ def main():
 
     _save_trajectory_plot(trajectory, raw_trajectory, filtered_trajectory)
     print(f"\nDone. Results: {args.output}  |  trajectory.png")
+
     raw_std_x, raw_std_y = compute_jitter(raw_trajectory)
     filt_std_x, filt_std_y = compute_jitter(filtered_trajectory)
 
-    print("\nJITTER ANALYSIS:")
-    print(f"Raw   std: x={raw_std_x:.4f}, y={raw_std_y:.4f}")
-    print(f"Kalman std: x={filt_std_x:.4f}, y={filt_std_y:.4f}")
+    jitter_report = (
+        "JITTER ANALYSIS:\n"
+        f"Raw   std: x={raw_std_x:.4f}, y={raw_std_y:.4f}\n"
+        f"Kalman std: x={filt_std_x:.4f}, y={filt_std_y:.4f}\n"
+    )
+
+    print("\n" + jitter_report, end="")
+
+    with open(jitter_txt_path, "w") as f:
+        f.write(jitter_report)
+
+    print(f"Jitter analysis saved to {jitter_txt_path}")
 
 
 
@@ -508,56 +519,49 @@ def main():
 def _save_trajectory_plot(trajectory: list,
                           raw_trajectory: list | None = None,
                           filtered_trajectory: list | None = None):
-    
     """
-    Generate top-down 2D plot of bin trajectory in world XY plane.
-    Mark the 3 stop positions. Save as trajectory.png.
-    Load waypoints.json if available to overlay tape marker positions.
+    Generate one top-down 2D plot in world XY plane.
+    Save only trajectory.png, containing:
+      - final trajectory
+      - raw trajectory
+      - Kalman filtered trajectory
+      - start/end markers
     """
-
     import matplotlib.pyplot as plt
 
     if not trajectory:
         print("No trajectory data — skipping plot.")
         return
 
-    xs, ys = zip(*trajectory)
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(xs, ys, linewidth=1.5, label="final trajectory")
+
+    # final output trajectory (includes occlusion predictions if any)
+    xs, ys = zip(*trajectory)
+    ax.plot(xs, ys, linestyle="--", linewidth=1.8, label="final trajectory")
+
+    # raw → dotted
+    if raw_trajectory:
+        rx, ry = zip(*raw_trajectory)
+        ax.plot(rx, ry, linestyle=":", linewidth=1.2, label="raw world position")
+
+    # Kalman → solid
+    if filtered_trajectory:
+        fx, fy = zip(*filtered_trajectory)
+        ax.plot(fx, fy, linewidth=2.0, label="Kalman filtered")
+
     ax.scatter(xs[0], ys[0], s=80, zorder=5, label="start")
     ax.scatter(xs[-1], ys[-1], s=80, zorder=5, label="end")
 
-    # If you have estimated waypoint world coordinates, plot them here:
-    # estimated_stops = [(x1,y1), (x2,y2), (x3,y3)]
-    # ax.scatter(*zip(*estimated_stops), s=140, marker='*',
-    #            color='orange', zorder=6, label='estimated GT stops')
-
     ax.set_xlabel("X world [m]")
     ax.set_ylabel("Y world [m]")
-    ax.set_title("Garbage bin trajectory — world XY plane")
+    ax.set_title("Garbage bin trajectory — raw vs. filtered vs. final")
     ax.legend()
     ax.set_aspect("equal")
     ax.grid(True, linewidth=0.5, alpha=0.5)
+
     fig.savefig("trajectory.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("trajectory.png saved.")
-
-    if raw_trajectory and filtered_trajectory:
-        rx, ry = zip(*raw_trajectory)
-        fx, fy = zip(*filtered_trajectory)
-
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.plot(rx, ry, label="raw world position")
-        ax.plot(fx, fy, label="kalman filtered")
-        ax.set_xlabel("X world [m]")
-        ax.set_ylabel("Y world [m]")
-        ax.set_title("Raw vs. Kalman-filtered world trajectory")
-        ax.legend()
-        ax.set_aspect("equal")
-        ax.grid(True, linewidth=0.5, alpha=0.5)
-        fig.savefig("kalman_xy.png", dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print("kalman_xy.png saved.")
 
 if __name__ == "__main__":
     main()
