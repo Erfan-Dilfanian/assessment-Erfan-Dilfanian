@@ -191,149 +191,107 @@ This section describes how the 3D position of the garbage bin is estimated from 
 
 ## **2a. Distance estimation from bounding box**
 
-We estimate the distance from the camera origin to the bin centroid using a **pinhole camera model** and the **known physical height of the bin**.
+We estimate the distance from the camera origin to the bin centroid using a pinhole camera model and the known physical height of the bin.
 
-### Known quantities
+Known quantities
 
 * Bin height:
-  [
-  H = 0.65 \text{ m}
-  ]
+  
+  H = 0.65 m
+  
 * Camera intrinsics:
-  [
-  K =
-  \begin{bmatrix}
-  f_x & 0 & c_x \
-  0 & f_y & c_y \
-  0 & 0 & 1
-  \end{bmatrix}
-  ]
+
+K = [[fx, 0, cx],
+     [0, fy, cy],
+     [0,  0,  1]]
 * Bounding box pixel height:
-  [
-  h_{px} = y_2 - y_1
-  ]
+  
+  h_px = y_2 - y_1
+  
 
----
 
-### **Depth derivation (pinhole model)**
+
+for Depth derivation (pinhole model)
 
 Using similar triangles:
 
-[
-\frac{h_{px}}{f_y} = \frac{H}{Z}
-]
+
+h_px/f_y = H/Z
+
 
 Rearranging:
 
-[
-Z = \frac{f_y \cdot H}{h_{px}}
-]
 
-This gives the **depth of the bin centroid along the optical axis**.
+Z = (f_y*H)/h_px
 
----
 
-### **Interpretation**
+This gives the depth of the bin centroid along the optical axis (zcam).
 
-* Larger bounding box → closer object
-* Smaller bounding box → farther object
-* This method assumes:
+This method assumes Bin is upright
 
-  * Bin is upright
-  * Height dominates bounding box scaling (reasonable for this scene)
+Once the 3D coordinates are computed (see 2b), the true Euclidean distance (the final distance to camera origin) is:
 
----
 
-### **Final distance to camera origin**
-
-Once the 3D coordinates are computed (see 2b), the **true Euclidean distance** is:
-
-[
 d = \sqrt{X^2 + Y^2 + Z^2}
-]
 
-This is what is reported as the camera-to-bin distance.
 
----
+
+
 
 ## **2b. 3D position in camera frame**
 
 After estimating depth (Z), we recover full 3D coordinates ((X, Y, Z)) in the camera coordinate frame.
 
----
 
-### **Step 1 — Bounding box center**
 
-The image projection of the bin centroid is approximated by:
 
-[
-u = \frac{x_1 + x_2}{2}, \quad v = \frac{y_1 + y_2}{2}
-]
 
----
+First, bounding box center is obtained. The image projection of the bin centroid is approximated by:
 
-### **Step 2 — Undistortion**
 
-The image is affected by lens distortion, so the pixel coordinates are first undistorted using:
+u = (x_1 + x_2)/2
+v = (y_1 + y_2)/2
+
+
+The image is affected by lens distortion, so the pixel coordinates are first undistorted using this command:
 
 ```python
 cv2.undistortPoints(...)
 ```
 
-This yields normalized image coordinates:
+This yields normalized image coordinates: x_n, y_n
 
-[
-x_n, y_n
-]
 
 These satisfy:
 
-[
-x_n = \frac{X}{Z}, \quad y_n = \frac{Y}{Z}
-]
 
----
+x_n = X/Z
 
-### **Step 3 — Recover X and Y**
+y_n = Y/Z
 
-[
-X = x_n \cdot Z
-]
-[
-Y = y_n \cdot Z
-]
 
----
 
-### **Final camera-frame coordinates**
+Hence, to recover X and Y, we have:
 
-[
-P_{cam} =
-\begin{bmatrix}
-X \
-Y \
-Z
-\end{bmatrix}
-=============
 
-\begin{bmatrix}
-x_n Z \
-y_n Z \
-Z
-\end{bmatrix}
-]
+X = x_n * Z
 
----
+Y = y_n * Z
 
-### **Coordinate convention (OpenCV)**
+
+
+And final camera-frame coordinates will be:
+
+
+P_cam = [X, Y, Z]^T = [x_n * Z, y_n * Z, Z]^T
+
+
+
+Note that camera frame coordinate convention (OpenCV) are:
 
 * (X): right
 * (Y): down
 * (Z): forward (optical axis)
-
----
-
-### **Output format**
 
 Each frame outputs:
 
@@ -341,17 +299,14 @@ Each frame outputs:
 frame_id, timestamp_ms, x_cam, y_cam, z_cam, confidence
 ```
 
-This directly satisfies Task 2b requirements .
 
 ---
 
 ## **2c. Transform to world frame**
 
-We convert camera-frame coordinates into a **world frame fixed at the base of the pole**.
+We convert camera-frame coordinates into a world frame fixed at the base of the pole.
 
----
-
-### **World frame definition**
+World frame definition is:
 
 * Origin: base of camera pole
 * Axes:
@@ -360,87 +315,59 @@ We convert camera-frame coordinates into a **world frame fixed at the base of th
   * (+Y): left
   * (+Z): upward
 
----
 
-### **Camera frame (OpenCV)**
+We first align camera axes with world axes (first R matrix):
 
-* (+X): right
-* (+Y): down
-* (+Z): forward
-
----
-
-### **Step 1 — Axis alignment**
-
-We first align camera axes with world axes:
-
-[
-\begin{aligned}
-X_{world} &= Z_{cam} \
-Y_{world} &= -X_{cam} \
-Z_{world} &= -Y_{cam}
-\end{aligned}
-]
+X_world =  Z_cam
+Y_world = -X_cam
+Z_world = -Y_cam
 
 This is implemented using the matrix:
 
-[
-R_{axis} =
-\begin{bmatrix}
-0 & 0 & 1 \
--1 & 0 & 0 \
-0 & -1 & 0
-\end{bmatrix}
-]
+R_axis =
+
+[  0   0   1 ]
+[ -1   0   0 ]
+[  0  -1   0 ]
 
 ---
 
-### **Step 2 — Camera tilt compensation**
+Then we drive R matrix for Camera tilt compensation:
 
 The camera is tilted downward by angle (\theta).
 We apply a rotation around the Y-axis:
 
-[
-R_y =
-\begin{bmatrix}
-\cos\theta & 0 & \sin\theta \
-0 & 1 & 0 \
--\sin\theta & 0 & \cos\theta
-\end{bmatrix}
-]
+R_y (rotation around Y-axis):
 
----
+[  cos(θ)   0   sin(θ) ]
+[    0      1     0    ]
+[ -sin(θ)   0   cos(θ) ]
 
-### **Step 3 — Final rotation**
 
-[
-R = R_y \cdot R_{axis}
-]
 
----
 
-### **Step 4 — Translation**
 
-The camera is mounted at height (h):
+Final combined rotation:
 
-[
-t =
-\begin{bmatrix}
-0 \
-0 \
-h
-\end{bmatrix}
-]
+R = R_y * R_axis
 
----
 
-### **Final transformation**
 
-[
-P_{world} = R \cdot P_{cam} + t
-]
 
----
+
+The camera is mounted at height (h), so the translation vector is:
+
+t = [ 0, 0, h ]^T
+
+
+
+
+
+final Camera-to-world transformation:
+
+P_world = R * P_cam + t
+
+
 
 ### **Interpretation**
 
@@ -499,4 +426,4 @@ For each frame:
 
 ---
 
-If you want, I can also give you a **shorter version (1/3 length)** for cleaner README, or a **"interview explanation version"** (how to explain this verbally in 1–2 minutes).
+
