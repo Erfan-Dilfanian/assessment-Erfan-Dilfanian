@@ -1,2 +1,0 @@
-train_best_fitness,val_map50,val_map50_95,val_precision,val_recall,test_map50,test_map50_95,test_precision,test_recall
-0.9851194992276004,0.995,0.9840216212744091,0.9968744616227022,1.0,0.995,0.9674514983153275,0.9946903090352018,1.0

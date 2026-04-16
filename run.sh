@@ -29,7 +29,7 @@ fi
 
 # --- environment setup -------------------------------------------------------
 
-echo "[run.sh] Installing system dependencies..."
+#echo "[run.sh] Installing system dependencies..."
 #sudo apt update
 #sudo apt install -y python3.10 python3-venv
 #echo "[INFO] Installing system dependencies..."

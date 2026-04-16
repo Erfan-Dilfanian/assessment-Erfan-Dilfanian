@@ -17,3 +17,30 @@ I tuned `process_var`(Q) and `meas_var`(R) in Klaman filter. With the prior know
 
 
 ground truth comparison
+# Skyscouter Assessment
+
+The impleemntation is tested on WSL 
+
+# dependencies
+the python dependencies and packages are installed via run.sh file.
+run.sh should install these:
+```bash
+sudo apt update
+sudo apt install -y python3.10 python3-venv \
+    libxcb-xinerama0 \
+    libxkbcommon-x11-0 \
+    libxcb-cursor0 \
+    libgl1-mesa-glx
+```
+
+I used some publlic datasets from roboflow, and added osme black trash bin images and labeled them myself too.
+some public datasets I used:
+https://universe.roboflow.com/test-fg7sa/bin-detection-test2
+
+my own added dataset:
+
+https://app.roboflow.com/registration-mfqu6/bin-735gq/1
+
+data augmentation. flip. resize
+
+mAP curve

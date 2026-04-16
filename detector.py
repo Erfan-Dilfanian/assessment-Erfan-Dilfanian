@@ -9,7 +9,7 @@ def load_detector(use_gpu: bool = False, weights_path: str = None):
     Load YOLO detector from trained weights.
     """
     if weights_path is None:
-        weights_path = "Model_Training/runs/train/bin_detector_vanilla/weights/best.pt"
+        weights_path = "./best.pt"
 
     model = YOLO(weights_path)
 
