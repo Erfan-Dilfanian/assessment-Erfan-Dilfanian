@@ -1,29 +1,10 @@
-command: bash run.sh --video "Input sample.mp4" --calib calib.json --kalman
 
-COCO does not have trash can / garbage bin
-
-training.
-occluded
-
-augmentation
-
-help from external roboflow dataset
-
-
-resize for edge employment
-
-Tuning of Q and R:
-I tuned `process_var`(Q) and `meas_var`(R) in Klaman filter. With the prior knowledge that the motion itself would be smooth, I tend to decrease process_var as lower Q means less process noise and the motion is smooth. As localization's source is from detection, the measuremtns are noisy. Hence, I tend to increase meas_var as higher R means measuremetns are noisy
-
-
-ground truth comparison
 # Skyscouter Assessment
 
 The impleemntation is tested on WSL 
 
 # dependencies
-the python dependencies and packages are installed via run.sh file.
-run.sh should install these:
+Note that run.sh install these dependencies that require sudo access:
 ```bash
 sudo apt update
 sudo apt install -y python3.10 python3-venv \
@@ -33,20 +14,17 @@ sudo apt install -y python3.10 python3-venv \
     libgl1-mesa-glx
 ```
 
-I used some publlic datasets from roboflow, and added osme black trash bin images and labeled them myself too.
-some public datasets I used:
-https://universe.roboflow.com/test-fg7sa/bin-detection-test2
 
 
 
-data augmentation. flip. resize
 
-mAP curve
+
+
 # Usage
 
 ```bash
 
-bash run.sh --video "Input sample.mp4" --calib calib.json --gpu
+bash run.sh --video "Input sample.mp4" --calib calib.json --gpu --kalman
 ```
 
 GPU spec:
@@ -85,9 +63,17 @@ I used some of the public dataset, such as the following:
 https://universe.roboflow.com/test-fg7sa/bin-detection-test2
 
 
-I found th emdoel trained solely on this public dataset struggles for black garbage bin, especially in grey background. So I gathered some images fomr the internet and also created some of my own dataset and added to that public dataset. My own dataset can be seen here:
+I found th emdoel trained solely on this public dataset struggles for black garbage bin, especially in grey background. So I gathered some images from the internet, mainly fo rbalck garbage bin, and also created some of my own dataset and added to that public dataset upon labelling them. My own dataset can be seen here:
 
 https://app.roboflow.com/registration-mfqu6/bin-735gq/1
+
+Data augmentation such as flipping has also been implemented.
+
+You may find the repository used for the model training here:
+
+
+
+You may use the same venv created by this repository for model training as well.
 
 ## occlusion handling
 
@@ -378,5 +364,160 @@ x_world, y_world, z_world, conf
 
 
 
+---
+---
+# 3. tracking
+## 3c. Kalman filter smoothing — derivation and mathematics
+
+The task asks for a constant-velocity Kalman filter and requires the state vector to be explained. My `PositionKalman` implementation follows that model.
+
+**State vector:**
+
+The Kalman filter state contains 6 values:
+
+`x_k = [x, y, z, vx, vy, vz]^T`
+
+where:
+
+* `x, y, z` are the world-frame position coordinates
+* `vx, vy, vz` are the world-frame velocities
+
+This is the standard constant-velocity state definition.
+
+Under the constant-velocity assumption, position changes according to velocity, while velocity stays unchanged between two consecutive frames.
+
+So the state transition model would be:
+
+`x_k = x_(k-1) + vx_(k-1) * dt`
+`y_k = y_(k-1) + vy_(k-1) * dt`
+`z_k = z_(k-1) + vz_(k-1) * dt`
+
+`vx_k = vx_(k-1)`
+`vy_k = vy_(k-1)`
+`vz_k = vz_(k-1)`
+
+In matrix form:
+
+`x_k = F_k * x_(k-1) + w_k`
+
+where `w_k` is the process noise, and the state-transition matrix is:
+
+```text
+F_k =
+[ 1  0  0  dt  0   0 ]
+[ 0  1  0   0 dt   0 ]
+[ 0  0  1   0  0  dt ]
+[ 0  0  0   1  0   0 ]
+[ 0  0  0   0  1   0 ]
+[ 0  0  0   0  0   1 ]
+```
+
+In the implementation, `dt` is updated from the actual video timestamps:
+
+`dt = (t_k - t_(k-1)) / 1000`
+
+This is better than assuming a fixed frame rate, because the Kalman prediction remains consistent with the real elapsed time between frames.
+
+Measurement model should also be obtained. The measurement is the raw localized world position base don bounding boxes we find:
+
+`z_k = [x_meas, y_meas, z_meas]^T`
+
+The measurement equation is:
+
+`z_k = H * x_k + v_k`
+
+where `v_k` is the measurement noise, and the measurement matrix is:
+
+```text
+H =
+[ 1  0  0  0  0  0 ]
+[ 0  1  0  0  0  0 ]
+[ 0  0  1  0  0  0 ]
+```
+
+This means the filter directly measures position only. Velocity is not measured directly; it is inferred by the filter over time.
+
+Kalman filter has a predict step (that uses the model) and update step (when new measurement comes).
+
+**Predict step:**
+Before using a new measurement, the Kalman filter predicts the next state:
+
+`x_pred = F_k * x_prev`
+
+and predicts the covariance:
+
+`P_pred = F_k * P_prev * F_k^T + Q`
+
+This is the step used during temporary occlusion as well. If the detector misses the bin for a few frames, the filter can still propagate the estimated position forward using the motion model.
+
+**Update step:**
+
+When a valid measurement is available, the filter updates the prediction.
+
+Innovation:
+
+`y_k = z_k - H * x_pred`
+
+Innovation covariance:
+
+`S_k = H * P_pred * H^T + R`
+
+Kalman gain:
+
+`K_k = P_pred * H^T * inv(S_k)`
+
+State update:
+
+`x_k = x_pred + K_k * y_k`
+
+Covariance update:
+
+`P_k = (I - K_k * H) * P_pred`
+
+This is the standard linear Kalman filter update.
+
+The raw position is the direct world-coordinate estimate from monocular localization:
+
+`p_raw = [x_raw, y_raw, z_raw]^T`
+
+The filtered position is the Kalman-smoothed version:
+
+`p_filt = [x_filt, y_filt, z_filt]^T`
+
+In the trajectory plot, only the top-down XY coordinates are shown, so the comparison is between:
+
+`(x_raw, y_raw)` and `(x_filt, y_filt)`
+
+This lets us visually compare the noisy measurements with the smoothed trajectory.
+
+To quantify jitter reduction, I compute the standard deviation of the coordinates.
+
+For one coordinate axis:
+
+`std_x = sqrt( (1/N) * sum((x_k - x_mean)^2) )`
+`std_y = sqrt( (1/N) * sum((y_k - y_mean)^2) )`
+
+Lower standard deviation means lower jitter.
+
+So the jitter reduction can be reported as:
+
+`delta_std_x = std_x_raw - std_x_filt`
+`delta_std_y = std_y_raw - std_y_filt`
+
+or as a percentage:
+
+`reduction_x(%) = 100 * (std_x_raw - std_x_filt) / std_x_raw`
+`reduction_y(%) = 100 * (std_y_raw - std_y_filt) / std_y_raw`
+
+In my current code, this is computed over the stored trajectory lists. For a stricter stationary-jitter analysis, the same formula should ideally be applied only to frames where the bin is stopped.
+
+**Tuning of Q and R:**
+I tuned `process_var`(Q) and `meas_var`(R) in Klaman filter. With the prior knowledge that the motion itself would be smooth, I tend to decrease process_var as lower Q means less process noise and the motion is smooth. As localization's source is from detection, the measuremtns are noisy. Hence, I tend to increase meas_var as higher R means measuremetns are noisy
 
 
+
+---
+
+
+## 3d. edge deployment notes
+You may resize images before passing them to the detection model to reduce inference time 
