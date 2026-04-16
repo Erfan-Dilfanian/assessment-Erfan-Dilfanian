@@ -29,17 +29,17 @@ fi
 
 # --- environment setup -------------------------------------------------------
 
-#echo "[run.sh] Installing system dependencies..."
-#sudo apt update
-#sudo apt install -y python3.10 python3-venv
-#echo "[INFO] Installing system dependencies..."
+echo "[run.sh] Installing system dependencies..."
+sudo apt update
+sudo apt install -y python3.10 python3-venv
+echo "[INFO] Installing system dependencies..."
 
 
-#sudo apt install -y \
-#    libxcb-xinerama0 \
-#    libxkbcommon-x11-0 \
-#    libxcb-cursor0 \
-#    libgl1-mesa-glx
+sudo apt install -y \
+    libxcb-xinerama0 \
+    libxkbcommon-x11-0 \
+    libxcb-cursor0 \
+    libgl1-mesa-glx
 
 #if [[ -d ".venv" ]]; then
 #  echo "[run.sh] Removing existing .venv ..."
