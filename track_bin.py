@@ -230,8 +230,8 @@ def main():
         raise RuntimeError(f"Cannot open video: {args.video}")
 
     with open(args.output, "w") as csv:
-        csv.write("frame_id,timestamp_ms,x_cam,y_cam,z_cam,"
-                  "x_world,y_world,z_world,conf\n")
+        csv.write("frame_id,timestamp_ms,x1,y1,x2,y2,"
+          "x_cam,y_cam,z_cam,x_world,y_world,z_world,conf\n")
 
         frame_id = 0
         while True:
@@ -277,12 +277,14 @@ def main():
                 last_age   = 0
                 xw, yw, zw = xyz_world
                 dt_ms = int((time.perf_counter() - t0) * 1000)
-                print(f"[frame {frame_id:04d}] bin @ world "
-                      f"({xw:.2f}, {yw:.2f}, {zw:.2f}) m  "
-                      f"conf={conf:.2f}  dt={dt_ms}ms")
+                print(f"[frame {frame_id:04d}] "
+                    f"bbox=({int(x1)},{int(y1)},{int(x2)},{int(y2)}) "
+                    f"bin @ world ({xw:.2f}, {yw:.2f}, {zw:.2f}) m  "
+                    f"conf={conf:.2f}  dt={dt_ms}ms")
                 csv.write(f"{frame_id},{ts_ms},"
-                          f"{xyz_cam[0]:.4f},{xyz_cam[1]:.4f},{xyz_cam[2]:.4f},"
-                          f"{xw:.4f},{yw:.4f},{zw:.4f},{conf:.3f}\n")
+                        f"{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},"
+                        f"{xyz_cam[0]:.4f},{xyz_cam[1]:.4f},{xyz_cam[2]:.4f},"
+                        f"{xw:.4f},{yw:.4f},{zw:.4f},{conf:.3f}\n")
                 trajectory.append((xw, yw))
             else:
                 last_age += 1
@@ -291,6 +293,7 @@ def main():
                       if predicted is not None else "unknown")
                 print(f"[frame {frame_id:04d}] OCCLUDED — "
                       f"last known {lk} m  age={last_age}fr")
+                
             
             cv2.imshow("Bin Detection", frame)
             key = cv2.waitKey(1) & 0xFF
