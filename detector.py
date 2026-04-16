@@ -8,6 +8,7 @@ def load_detector(use_gpu: bool = False, weights_path: str = None):
     """
     Load YOLO detector from trained weights.
     """
+
     if weights_path is None:
         weights_path = "./best.pt"
 
@@ -15,7 +16,16 @@ def load_detector(use_gpu: bool = False, weights_path: str = None):
 
     if use_gpu and torch.cuda.is_available():
         model.to("cuda")
+
+        gpu_name = torch.cuda.get_device_name(0)
+        total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        cuda_version = torch.version.cuda
+
         print("[INFO] YOLO loaded on CUDA")
+        print(f"[INFO] GPU: {gpu_name}")
+        print(f"[INFO] VRAM: {total_mem:.1f} GB")
+        print(f"[INFO] CUDA: {cuda_version}")
+
     else:
         model.to("cpu")
         print("[INFO] YOLO loaded on CPU")
@@ -31,6 +41,7 @@ def detect_bin(frame: np.ndarray, model, conf_thres: float = 0.25):
     results = model.predict(
         source=frame,
         conf=conf_thres,
+        device="cuda" if next(model.model.parameters()).is_cuda else "cpu",
         verbose=False
     )
 
