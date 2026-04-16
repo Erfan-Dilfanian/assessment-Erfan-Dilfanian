@@ -184,20 +184,135 @@ def estimate_3d_(bbox: tuple, K: np.ndarray, D: np.ndarray) -> np.ndarray:
 
 class PositionKalman:
     """
-    Constant-velocity Kalman filter over 3D world position.
-    State vector: [x, y, z, vx, vy, vz]
+    Constant-velocity Kalman filter for 3D world position.
 
-    Implement this for the bonus task (3c).
-    Explain Q, R, and state vector choices in README.
+    State:
+        x = [x, y, z, vx, vy, vz]^T
+
+    Measurement:
+        z = [x, y, z]^T
     """
-    def __init__(self):
-        raise NotImplementedError("TODO: implement PositionKalman")
+
+    def __init__(self, dt: float = 1/30,
+                 process_var: float = 2e-3,  # Q, process noise. lower Q means motion is smooth
+                 meas_var: float = 7e-2):    # R, measuremtn noise, higher R means measuremetns are noisy
+        self.dt = dt
+
+        # state vector: [x, y, z, vx, vy, vz]
+        self.x = np.zeros((6, 1), dtype=np.float64)
+
+        # covariance
+        self.P = np.eye(6, dtype=np.float64) * 1.0
+
+        # state transition
+        self.F = np.array([
+            [1, 0, 0, dt, 0,  0],
+            [0, 1, 0, 0,  dt, 0],
+            [0, 0, 1, 0,  0,  dt],
+            [0, 0, 0, 1,  0,  0],
+            [0, 0, 0, 0,  1,  0],
+            [0, 0, 0, 0,  0,  1],
+        ], dtype=np.float64)
+
+        # measurement matrix
+        self.H = np.array([
+            [1, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0],
+        ], dtype=np.float64)
+
+        # process noise
+        self.Q = np.eye(6, dtype=np.float64) * process_var
+
+        # measurement noise
+        self.R = np.eye(3, dtype=np.float64) * meas_var
+
+        self.I = np.eye(6, dtype=np.float64)
+
+        self.initialized = False
+
+    def set_dt(self, dt: float):
+        self.dt = dt
+        self.F = np.array([
+            [1, 0, 0, dt, 0,  0],
+            [0, 1, 0, 0,  dt, 0],
+            [0, 0, 1, 0,  0,  dt],
+            [0, 0, 0, 1,  0,  0],
+            [0, 0, 0, 0,  1,  0],
+            [0, 0, 0, 0,  0,  1],
+        ], dtype=np.float64)
+
+    def predict(self) -> np.ndarray | None:
+        if not self.initialized:
+            return None
+
+        self.x = self.F @ self.x
+        self.P = self.F @ self.P @ self.F.T + self.Q
+        return self.x[:3, 0].copy()
 
     def update(self, xyz_meas: np.ndarray) -> np.ndarray:
-        raise NotImplementedError
+        z = np.asarray(xyz_meas, dtype=np.float64).reshape(3, 1)
 
-    def predict(self) -> np.ndarray:
-        raise NotImplementedError
+        if not self.initialized:
+            self.x[:3, 0] = z[:, 0]
+            self.x[3:, 0] = 0.0
+            self.initialized = True
+            return self.x[:3, 0].copy()
+
+        # predict
+        self.x = self.F @ self.x
+        self.P = self.F @ self.P @ self.F.T + self.Q
+
+        # update
+        y = z - self.H @ self.x
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+
+        self.x = self.x + K @ y
+        self.P = (self.I - K @ self.H) @ self.P
+
+        return self.x[:3, 0].copy()
+
+
+def compute_jitter(traj):
+    if not traj:
+        return np.nan, np.nan
+    xs = np.array([p[0] for p in traj])
+    ys = np.array([p[1] for p in traj])
+    return np.std(xs), np.std(ys)
+
+# ── To handle occulsion ─────────────────────────────────────────────────────────────────
+
+MAX_OCCLUSION_FRAMES = 12
+MIN_CONF_FOR_MEAS = 0.20
+
+
+def bbox_to_center_size(bbox):
+    x1, y1, x2, y2 = bbox
+    cx = 0.5 * (x1 + x2)
+    cy = 0.5 * (y1 + y2)
+    w = x2 - x1
+    h = y2 - y1
+    return cx, cy, w, h
+
+
+def center_size_to_bbox(cx, cy, w, h, frame_shape):
+    H, W = frame_shape[:2]
+    x1 = max(0, min(W - 1, cx - 0.5 * w))
+    y1 = max(0, min(H - 1, cy - 0.5 * h))
+    x2 = max(0, min(W - 1, cx + 0.5 * w))
+    y2 = max(0, min(H - 1, cy + 0.5 * h))
+    return (float(x1), float(y1), float(x2), float(y2))
+
+
+def predict_bbox(last_bbox, velocity, frame_shape):
+    cx, cy, w, h = bbox_to_center_size(last_bbox)
+    vx, vy = velocity
+    cx_pred = cx + vx
+    cy_pred = cy + vy
+    return center_size_to_bbox(cx_pred, cy_pred, w, h, frame_shape)
+
+
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -222,8 +337,16 @@ def main():
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
     trajectory = []
-    last_known = None
-    last_age   = 0
+    raw_trajectory = []
+    filtered_trajectory = []
+
+    last_known_world = None
+    last_valid_bbox = None
+    prev_valid_bbox = None
+    bbox_velocity = (0.0, 0.0)
+    last_age = 0
+
+    prev_ts_ms = None
 
     cap = cv2.VideoCapture(args.video)
     if not cap.isOpened():
@@ -231,7 +354,10 @@ def main():
 
     with open(args.output, "w") as csv:
         csv.write("frame_id,timestamp_ms,x1,y1,x2,y2,"
-          "x_cam,y_cam,z_cam,x_world,y_world,z_world,conf\n")
+            "x_cam,y_cam,z_cam,"
+            "x_world_raw,y_world_raw,z_world_raw,"
+            "x_world,y_world,z_world,"
+            "conf,status\n")
 
         frame_id = 0
         while True:
@@ -241,65 +367,121 @@ def main():
                 break
 
             ts_ms = int(cap.get(cv2.CAP_PROP_POS_MSEC))
-            det   = detect_bin(frame, model)
 
-            if det is not None:
+            # update dt for Kalman from timestamps if possible
+            if prev_ts_ms is not None and kf is not None:
+                dt = max((ts_ms - prev_ts_ms) / 1000.0, 1e-3)
+                kf.set_dt(dt)
+            prev_ts_ms = ts_ms
+
+            det = detect_bin(frame, model)
+
+            have_measurement = det is not None and det[4] >= MIN_CONF_FOR_MEAS
+
+            if have_measurement:
                 x1, y1, x2, y2, conf = det
+                meas_bbox = (x1, y1, x2, y2)
 
-                cv2.rectangle(
-                    frame,
-                    (int(x1), int(y1)),
-                    (int(x2), int(y2)),
-                    (0, 255, 0),
-                    2
-                )
+                # estimate image-plane velocity from consecutive detections
+                if last_valid_bbox is not None:
+                    cx_prev, cy_prev, _, _ = bbox_to_center_size(last_valid_bbox)
+                    cx_now, cy_now, _, _ = bbox_to_center_size(meas_bbox)
+                    bbox_velocity = (cx_now - cx_prev, cy_now - cy_prev)
 
-                cv2.putText(
-                    frame,
-                    f"bin {conf:.2f}",
-                    (int(x1), max(30, int(y1) - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2
-                )
+                prev_valid_bbox = last_valid_bbox
+                last_valid_bbox = meas_bbox
+                last_age = 0
 
-                xyz_cam   = estimate_3d((x1, y1, x2, y2), K, D)
+                # draw measurement bbox
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                cv2.putText(frame,
+                            f"bin {conf:.2f}",
+                            (int(x1), max(30, int(y1) - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8, (0, 255, 0), 2)
 
-                dist_cam = camera_distance_from_xyz(xyz_cam)
+                xyz_cam = estimate_3d(meas_bbox, K, D)
+                xyz_world_raw = cam_to_world(xyz_cam, R, t)
 
-                xyz_world = cam_to_world(xyz_cam, R, t)
+                raw_trajectory.append((xyz_world_raw[0], xyz_world_raw[1]))
 
                 if kf is not None:
-                    xyz_world = kf.update(xyz_world)
+                    xyz_world = kf.update(xyz_world_raw)
+                else:
+                    xyz_world = xyz_world_raw
 
-                last_known = xyz_world
-                last_age   = 0
+                filtered_trajectory.append((xyz_world[0], xyz_world[1]))
+                last_known_world = xyz_world
+
+                dist_cam = camera_distance_from_xyz(xyz_cam)
                 xw, yw, zw = xyz_world
                 dt_ms = int((time.perf_counter() - t0) * 1000)
+
                 print(f"[frame {frame_id:04d}] "
                     f"bbox=({int(x1)},{int(y1)},{int(x2)},{int(y2)}) "
                     f"bin @ world ({xw:.2f}, {yw:.2f}, {zw:.2f}) m  "
                     f"conf={conf:.2f}  dt={dt_ms}ms")
+
                 csv.write(f"{frame_id},{ts_ms},"
                         f"{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},"
                         f"{xyz_cam[0]:.4f},{xyz_cam[1]:.4f},{xyz_cam[2]:.4f},"
-                        f"{xw:.4f},{yw:.4f},{zw:.4f},{conf:.3f}\n")
+                        f"{xyz_world_raw[0]:.4f},{xyz_world_raw[1]:.4f},{xyz_world_raw[2]:.4f},"
+                        f"{xw:.4f},{yw:.4f},{zw:.4f},"
+                        f"{conf:.3f},measured\n")
+
                 trajectory.append((xw, yw))
+
             else:
                 last_age += 1
-                predicted = kf.predict() if kf is not None else last_known
-                lk = (f"({predicted[0]:.2f}, {predicted[1]:.2f}, {predicted[2]:.2f})"
-                      if predicted is not None else "unknown")
-                print(f"[frame {frame_id:04d}] OCCLUDED — "
-                      f"last known {lk} m  age={last_age}fr")
-                
-            
+
+                predicted_world = kf.predict() if kf is not None else last_known_world
+
+                if last_valid_bbox is not None and last_age <= MAX_OCCLUSION_FRAMES:
+                    pred_bbox = predict_bbox(last_valid_bbox, bbox_velocity, frame.shape)
+                    px1, py1, px2, py2 = pred_bbox
+
+                    # update last_valid_bbox so prediction can continue through several frames
+                    last_valid_bbox = pred_bbox
+
+                    cv2.rectangle(frame,
+                                (int(px1), int(py1)),
+                                (int(px2), int(py2)),
+                                (0, 165, 255), 2)
+                    cv2.putText(frame,
+                                f"occluded/pred {last_age}fr",
+                                (int(px1), max(30, int(py1) - 10)),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0, 165, 255), 2)
+
+                    if predicted_world is not None:
+                        xw, yw, zw = predicted_world
+                        dt_ms = int((time.perf_counter() - t0) * 1000)
+                        print(f"[frame {frame_id:04d}] OCCLUDED — "
+                            f"pred world ({xw:.2f}, {yw:.2f}, {zw:.2f}) m  "
+                            f"age={last_age}fr  dt={dt_ms}ms")
+
+                        # Optional camera estimate from predicted bbox
+                        xyz_cam_pred = estimate_3d(pred_bbox, K, D)
+
+                        csv.write(f"{frame_id},{ts_ms},"
+                                f"{px1:.1f},{py1:.1f},{px2:.1f},{py2:.1f},"
+                                f"{xyz_cam_pred[0]:.4f},{xyz_cam_pred[1]:.4f},{xyz_cam_pred[2]:.4f},"
+                                f"nan,nan,nan,"
+                                f"{xw:.4f},{yw:.4f},{zw:.4f},"
+                                f"0.000,predicted\n")
+
+                        trajectory.append((xw, yw))
+                        # filtered_trajectory.append((xw, yw))
+                    else:
+                        print(f"[frame {frame_id:04d}] OCCLUDED — unknown")
+                else:
+                    print(f"[frame {frame_id:04d}] LOST — age={last_age}fr")
+
             cv2.imshow("Bin Detection", frame)
             key = cv2.waitKey(1) & 0xFF
             if key == 27:
                 break
-                
+
             frame_id += 1
 
 
@@ -310,17 +492,30 @@ def main():
 
     cv2.destroyAllWindows()
 
-    _save_trajectory_plot(trajectory)
+    _save_trajectory_plot(trajectory, raw_trajectory, filtered_trajectory)
     print(f"\nDone. Results: {args.output}  |  trajectory.png")
+    raw_std_x, raw_std_y = compute_jitter(raw_trajectory)
+    filt_std_x, filt_std_y = compute_jitter(filtered_trajectory)
+
+    print("\nJITTER ANALYSIS:")
+    print(f"Raw   std: x={raw_std_x:.4f}, y={raw_std_y:.4f}")
+    print(f"Kalman std: x={filt_std_x:.4f}, y={filt_std_y:.4f}")
 
 
-def _save_trajectory_plot(trajectory: list):
+
+
+
+def _save_trajectory_plot(trajectory: list,
+                          raw_trajectory: list | None = None,
+                          filtered_trajectory: list | None = None):
+    
     """
     Generate top-down 2D plot of bin trajectory in world XY plane.
     Mark the 3 stop positions. Save as trajectory.png.
     Load waypoints.json if available to overlay tape marker positions.
     """
-    import matplotlib.pyplot as plt, os, json
+
+    import matplotlib.pyplot as plt
 
     if not trajectory:
         print("No trajectory data — skipping plot.")
@@ -328,9 +523,9 @@ def _save_trajectory_plot(trajectory: list):
 
     xs, ys = zip(*trajectory)
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(xs, ys, linewidth=1.2, color="steelblue", label="trajectory")
-    ax.scatter(xs[0],  ys[0],  s=80, color="green", zorder=5, label="start")
-    ax.scatter(xs[-1], ys[-1], s=80, color="red",   zorder=5, label="end")
+    ax.plot(xs, ys, linewidth=1.5, label="final trajectory")
+    ax.scatter(xs[0], ys[0], s=80, zorder=5, label="start")
+    ax.scatter(xs[-1], ys[-1], s=80, zorder=5, label="end")
 
     # If you have estimated waypoint world coordinates, plot them here:
     # estimated_stops = [(x1,y1), (x2,y2), (x3,y3)]
@@ -339,7 +534,7 @@ def _save_trajectory_plot(trajectory: list):
 
     ax.set_xlabel("X world [m]")
     ax.set_ylabel("Y world [m]")
-    ax.set_title("Garbage bin trajectory — world XY plane (top-down)")
+    ax.set_title("Garbage bin trajectory — world XY plane")
     ax.legend()
     ax.set_aspect("equal")
     ax.grid(True, linewidth=0.5, alpha=0.5)
@@ -347,6 +542,22 @@ def _save_trajectory_plot(trajectory: list):
     plt.close(fig)
     print("trajectory.png saved.")
 
+    if raw_trajectory and filtered_trajectory:
+        rx, ry = zip(*raw_trajectory)
+        fx, fy = zip(*filtered_trajectory)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.plot(rx, ry, label="raw world position")
+        ax.plot(fx, fy, label="kalman filtered")
+        ax.set_xlabel("X world [m]")
+        ax.set_ylabel("Y world [m]")
+        ax.set_title("Raw vs. Kalman-filtered world trajectory")
+        ax.legend()
+        ax.set_aspect("equal")
+        ax.grid(True, linewidth=0.5, alpha=0.5)
+        fig.savefig("kalman_xy.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print("kalman_xy.png saved.")
 
 if __name__ == "__main__":
     main()
